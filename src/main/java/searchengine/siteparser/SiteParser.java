@@ -14,13 +14,16 @@ import searchengine.repositoryes.IndexRepository;
 import searchengine.repositoryes.LemmaRepository;
 import searchengine.repositoryes.PageRepository;
 import searchengine.repositoryes.SiteRepository;
-import searchengine.services.IndexingServiceImpl;
+import searchengine.services.IndexingService;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.RecursiveAction;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 @Component
@@ -28,18 +31,20 @@ import java.util.regex.Pattern;
 public class SiteParser extends RecursiveAction {
 
     private String url;
-    private final Site site;
-    private final Config config;
-    private final Lemmatizer lemmatizer;
     private final List<String> visitUrl;
-    private final PageRepository pageRepository;
-    private final SiteRepository siteRepository;
-    private final LemmaRepository lemmaRepository;
-    private final IndexRepository indexRepository;
-    private final List<SiteParser> parserList = new ArrayList<>();
+    private final transient Logger logger;
+    private final transient Site rootSite;
+    private final transient Config config;
+    private final transient Lemmatizer lemmatizer;
+    private final transient IndexingService indexingService;
+    private final transient PageRepository pageRepository;
+    private final transient SiteRepository siteRepository;
+    private final transient LemmaRepository lemmaRepository;
+    private final transient IndexRepository indexRepository;
 
-    public SiteParser(Site site, IndexingServiceImpl indexingService) {
-        this.site = site;
+    public SiteParser(Site site, IndexingService indexingService) {
+        this.rootSite = site;
+        logger = indexingService.getLogger();
         visitUrl = new ArrayList<>();
         config = indexingService.getConfig();
         pageRepository = indexingService.getPageRepository();
@@ -47,11 +52,12 @@ public class SiteParser extends RecursiveAction {
         lemmatizer = indexingService.getLemmatizer();
         lemmaRepository = indexingService.getLemmaRepository();
         indexRepository = indexingService.getIndexRepository();
+        this.indexingService = indexingService;
     }
 
     private SiteParser(String url, SiteParser siteParser) {
         this.url = url;
-        site = siteParser.site;
+        rootSite = siteParser.rootSite;
         config = siteParser.config;
         visitUrl = siteParser.visitUrl;
         pageRepository = siteParser.pageRepository;
@@ -59,13 +65,21 @@ public class SiteParser extends RecursiveAction {
         lemmatizer = siteParser.lemmatizer;
         lemmaRepository = siteParser.lemmaRepository;
         indexRepository = siteParser.indexRepository;
+        indexingService = siteParser.indexingService;
+        logger = siteParser.logger;
     }
 
     @Override
     protected void compute() {
+        if (indexingService.isStopFlag()) {
+            return;
+        }
+
+        List<SiteParser> parserList = new ArrayList<>();
+
         try {
             Thread.sleep(200);
-            String connectUrl = site.getUrl();
+            String connectUrl = rootSite.getUrl();
             connectUrl = url == null ? connectUrl : connectUrl + url;
 
             Document doc = Jsoup.connect(connectUrl)
@@ -79,17 +93,21 @@ public class SiteParser extends RecursiveAction {
             Elements elements = doc.select("body").select("a");
 
             for (Element a : elements) {
-                String url = a.absUrl("href").replaceAll("\\?.+", "");
-                if (isCorrectUrl(url) & !visitUrl.contains(url)) {
-                    visitUrl.add(url);
-                    SiteParser parser = new SiteParser(correctUrl(url), this);
+                String href = a.absUrl("href").replaceAll("\\?.+", "");
+                if (isCorrectUrl(href) && !visitUrl.contains(href)) {
+                    visitUrl.add(href);
+                    SiteParser parser = new SiteParser(correctUrl(href), this);
                     parser.fork();
                     parserList.add(parser);
                 }
             }
 
-        } catch (Exception e) {
-            System.out.println(e.getMessage());
+        } catch (InterruptedException e) {
+            logger.log(Level.WARNING, "Interrupted!", e);
+            Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "HttpError!", e);
+            Thread.currentThread().interrupt();
         }
 
         for (SiteParser parser : parserList) {
@@ -98,29 +116,29 @@ public class SiteParser extends RecursiveAction {
     }
 
     private void addPage(Document document, String url) {
-        if (url.equals("")){
+        if (url.equals("")) {
             return;
         }
-        Site site = siteRepository.findSiteByUrl(this.site.getUrl());
+        Site site = siteRepository.findSiteByUrl(this.rootSite.getUrl());
         int code = document.connection().response().statusCode();
         site.setStatusTime(new Date());
         siteRepository.save(site);
 
         Page page = pageRepository.findByPath(url);
-        if (page == null){
+        if (page == null) {
             page = new Page();
             page.setPath(url);
             page.setContent(document.html());
             page.setCode(code);
             page.setSite(site);
             pageRepository.save(page);
-            if (code < 400){
+            if (code < 400) {
                 addLemmasAndIndexes(page, document);
             }
         }
     }
 
-    private synchronized void addLemmasAndIndexes(Page page, Document document){
+    private synchronized void addLemmasAndIndexes(Page page, Document document) {
         String text = document.text();
 
         lemmatizer.getRussianMapLemmaCount(text).forEach((word, count) -> {
@@ -138,13 +156,13 @@ public class SiteParser extends RecursiveAction {
         });
     }
 
-    private Lemma addLemma(String word){
-        Lemma lemma = lemmaRepository.findByLemmaAndSite(word, site);
+    private Lemma addLemma(String word) {
+        Lemma lemma = lemmaRepository.findByLemmaAndSite(word, rootSite);
         if (lemma == null) {
             lemma = new Lemma();
             lemma.setLemma(word);
             lemma.setFrequency(1);
-            lemma.setSite(site);
+            lemma.setSite(rootSite);
         } else {
             lemma.setFrequency(lemma.getFrequency() + 1);
         }
@@ -152,7 +170,7 @@ public class SiteParser extends RecursiveAction {
         return lemma;
     }
 
-    private void addIndex(Lemma lemma, Page page, int count){
+    private void addIndex(Lemma lemma, Page page, int count) {
         Index index = indexRepository.findByLemmaAndPage(lemma, page);
         if (index == null) {
             index = new Index();
@@ -165,14 +183,14 @@ public class SiteParser extends RecursiveAction {
     }
 
     private String correctUrl(String url) {
-        url = url.replace(site.getUrl(), "").replace("//", "/");
+        url = url.replace(rootSite.getUrl(), "").replace("//", "/");
         url = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
         return url;
     }
 
     private boolean isCorrectUrl(String url) {
         url = url.toLowerCase(Locale.ROOT);
-        Pattern patternRoot = Pattern.compile("^" + site.getUrl());
+        Pattern patternRoot = Pattern.compile("^" + rootSite.getUrl());
         Pattern patternNotFile = Pattern.compile("([^\\s]+(\\.(?i)(jpg|png|gif|bmp|pdf))$)");
         Pattern patternNotAnchor = Pattern.compile("#([\\w\\-]+)?$");
         Pattern patternNotSort = Pattern.compile("/sort/");

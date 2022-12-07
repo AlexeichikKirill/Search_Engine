@@ -3,7 +3,7 @@ package searchengine.dto.statistics;
 import lombok.Data;
 import searchengine.model.Site;
 import searchengine.model.Status;
-import searchengine.services.StatisticsServiceImpl;
+import searchengine.services.StatisticsService;
 
 import java.util.Date;
 
@@ -17,7 +17,7 @@ public class DetailedStatisticsItem {
     private int pages;
     private int lemmas;
 
-    public DetailedStatisticsItem(Site site, StatisticsServiceImpl statisticsService) {
+    public DetailedStatisticsItem(Site site, StatisticsService statisticsService) {
         this.url = site.getUrl();
         this.name = site.getName();
         this.status = site.getStatus();
