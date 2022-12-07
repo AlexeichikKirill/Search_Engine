@@ -9,7 +9,9 @@ import java.util.Date;
 @Getter
 @Setter
 @Entity
-@Table(name = "site")
+@Table(name = "site", uniqueConstraints = {
+        @UniqueConstraint(name = "uc_site_url", columnNames = {"url"})
+})
 public class Site {
 
     @Id

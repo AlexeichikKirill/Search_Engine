@@ -43,24 +43,25 @@ public class IndexingService {
     private LemmaRepository lemmaRepository;
 
     private boolean stopFlag = false;
+    private boolean isStarted = false;
     private final Logger logger = getLogger();
     private final Config config;
     private final ConfigSitesList sites;
     private final Lemmatizer lemmatizer = new Lemmatizer();
     private final List<ForkJoinPool> poolList = new ArrayList<>();
     private final Map<Site, ForkJoinPool> sitePoolMap = new HashMap<>();
-    private static final String BAD_RESPONSE_ERR = "Индексация уже запущена";
 
     public IndexingResponse getStartIndexing() {
         List<Site> indexingSites = siteRepository.findAllByStatus(Status.INDEXING);
 
-        if (indexingSites.isEmpty()) {
+        if (indexingSites.isEmpty() && !isStarted) {
+            isStarted = true;
             new Thread(this::startIndexingAllSites).start();
             return new IndexingResponseOk();
         }
 
         IndexingResponseBad responseBad = new IndexingResponseBad();
-        responseBad.setError(BAD_RESPONSE_ERR);
+        responseBad.setError("Индексация уже запущена");
         return responseBad;
     }
 
@@ -69,14 +70,16 @@ public class IndexingService {
 
         if (indexingSites.isEmpty()) {
             IndexingResponseBad responseBad = new IndexingResponseBad();
-            responseBad.setError(BAD_RESPONSE_ERR);
+            responseBad.setError("Индексация не запущена");
             return responseBad;
         }
+
         stopFlag = true;
+        isStarted = false;
         poolList.forEach(ForkJoinPool::shutdown);
         poolList.clear();
 
-        siteRepository.findAll().forEach(site -> {
+        indexingSites.forEach(site -> {
             site.setLastError("Индексация остановлена пользователем");
             site.setStatusTime(new Date());
             site.setStatus(Status.FAILED);
@@ -106,6 +109,7 @@ public class IndexingService {
     }
 
     private void startIndexingAllSites() {
+
         if (!sites.getSites().isEmpty()) {
             sites.getSites().forEach(this::addSite);
             stopFlag = false;
