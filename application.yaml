@@ -15,6 +15,10 @@ config:
   referrer: http://www.google.com
 
 spring:
+  security:
+    user:
+      name: admin
+      password: admin
   datasource:
     username: root
     password: 6Jgfj2NO
