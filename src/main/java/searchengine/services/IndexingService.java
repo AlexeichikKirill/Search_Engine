@@ -44,12 +44,18 @@ public class IndexingService {
 
     private boolean stopFlag = false;
     private boolean isStarted = false;
-    private final Logger logger = getLogger();
+
     private final Config config;
     private final ConfigSitesList sites;
+    private final Logger logger = getLogger();
     private final Lemmatizer lemmatizer = new Lemmatizer();
     private final List<ForkJoinPool> poolList = new ArrayList<>();
     private final Map<Site, ForkJoinPool> sitePoolMap = new HashMap<>();
+
+    private static final String INDEXING_STOP_MESSAGE = "Индексация остановлена пользователем";
+    private static final String BAD_SITE_MESSAGE = "Данная страница находится за пределами сайтов, указанных в конфигурационном файле";
+    private static final String BAD_START_RESPONSE_MESSAGE = "Индексация уже запущена";
+    private static final String BAD_STOP_RESPONSE_MESSAGE = "Индексация не запущена";
 
     public IndexingResponse getStartIndexing() {
         List<Site> indexingSites = siteRepository.findAllByStatus(Status.INDEXING);
@@ -61,7 +67,7 @@ public class IndexingService {
         }
 
         IndexingResponseBad responseBad = new IndexingResponseBad();
-        responseBad.setError("Индексация уже запущена");
+        responseBad.setError(BAD_START_RESPONSE_MESSAGE);
         return responseBad;
     }
 
@@ -70,7 +76,7 @@ public class IndexingService {
 
         if (indexingSites.isEmpty()) {
             IndexingResponseBad responseBad = new IndexingResponseBad();
-            responseBad.setError("Индексация не запущена");
+            responseBad.setError(BAD_STOP_RESPONSE_MESSAGE);
             return responseBad;
         }
 
@@ -80,7 +86,7 @@ public class IndexingService {
         poolList.clear();
 
         indexingSites.forEach(site -> {
-            site.setLastError("Индексация остановлена пользователем");
+            site.setLastError(INDEXING_STOP_MESSAGE);
             site.setStatusTime(new Date());
             site.setStatus(Status.FAILED);
             siteRepository.save(site);
@@ -99,7 +105,7 @@ public class IndexingService {
 
         if (configSite == null) {
             IndexingResponseBad responseBad = new IndexingResponseBad();
-            responseBad.setError("Данная страница находится за пределами сайтов, указанных в конфигурационном файле");
+            responseBad.setError(BAD_SITE_MESSAGE);
             return responseBad;
         }
 
@@ -109,7 +115,6 @@ public class IndexingService {
     }
 
     private void startIndexingAllSites() {
-
         if (!sites.getSites().isEmpty()) {
             sites.getSites().forEach(this::addSite);
             stopFlag = false;

@@ -45,6 +45,7 @@ public class SearchService {
 
     private String query;
     private SortedSet<Lemma> lemmaSortedSet = new TreeSet<>();
+    private Map<String, String> lemmaWordMap = new HashMap<>();
     private final Config config;
     private final ConfigSitesList sites;
     private final Lemmatizer lemmatizer = new Lemmatizer();
@@ -73,7 +74,6 @@ public class SearchService {
             }
             response.addData(getSearchData(site));
         }
-
 
         if (response.getCount() < offset) {
             SearchResponse responseBad = new SearchResponse();
@@ -121,9 +121,9 @@ public class SearchService {
     private String snippet(String inText) {
         String text = clearText(inText);
         StringBuilder snippet = new StringBuilder();
+        lemmaWordMap = new HashMap<>();
         List<String> tList = new ArrayList<>();
         List<String> qList = new ArrayList<>();
-        Map<String, String> lemmaWordMap = new HashMap<>();
 
         for (String word : text.split("\\s+")) {
             String lemma = lemmatizer.getLemmaWord(word).toLowerCase(Locale.ROOT);
@@ -136,26 +136,7 @@ public class SearchService {
         }
 
         List<Integer> foundsWordsIndexes = new ArrayList<>();
-        for (String qWord : qList) {
-            if (tList.contains(qWord)) {
-                int indexOf = tList.indexOf(qWord);
-                String wordInText = lemmaWordMap.get(qWord);
-                lemmaWordMap.replace(qWord, wordInText, "<b>" + wordInText + "</b>");
-                foundsWordsIndexes.add(indexOf);
-
-                if (tList.size() <= 30) {
-                    continue;
-                }
-                int startSL = indexOf < 10 ? indexOf : indexOf - 10;
-                int endSL = startSL + 30 > tList.size() ? startSL : startSL + 30;
-
-                if (startSL + 30 > tList.size()){
-                    endSL = startSL + 20 > tList.size() ? startSL + 10 > tList.size() ? startSL : startSL + 10 : startSL;
-                }
-
-                tList = tList.subList(startSL, endSL);
-            }
-        }
+        tList = createListFromText(tList, qList, foundsWordsIndexes);
 
         if (foundsWordsIndexes.isEmpty()) {
             if (inText.length() < 200) {
@@ -170,7 +151,39 @@ public class SearchService {
         return snippet.toString();
     }
 
-    private void setRel(List<Page> pageList){
+    private List<String> createListFromText(List<String> tList, List<String> qList,
+                                            List<Integer> foundsWordsIndexes){
+        for (String qWord : qList) {
+            if (!tList.contains(qWord)) {
+                continue;
+            }
+
+            int indexOf = tList.indexOf(qWord);
+            String wordInText = lemmaWordMap.get(qWord);
+            lemmaWordMap.replace(qWord, wordInText, "<b>" + wordInText + "</b>");
+            foundsWordsIndexes.add(indexOf);
+
+            if (tList.size() <= 30) {
+                continue;
+            }
+
+            int startSL = indexOf < 10 ? indexOf : indexOf - 10;
+            int endSL = startSL;
+
+            if (startSL + 30 <= tList.size()) {
+                endSL = startSL + 30;
+            } else if (startSL + 20 <= tList.size()) {
+                endSL =  startSL + 20;
+            } else if (startSL + 10 <= tList.size()) {
+                endSL = startSL + 10;
+            }
+
+            tList = tList.subList(startSL, endSL);
+        }
+        return tList;
+    }
+
+    private void setRel(List<Page> pageList) {
         pageList.forEach(page -> {
             AtomicReference<Float> absRel = new AtomicReference<>(0f);
             for (Lemma lemma : lemmaSortedSet) {
@@ -223,7 +236,7 @@ public class SearchService {
     }
 
     private SortedSet<Lemma> findLemmas(String query, Site site) {
-        SortedSet<Lemma> lemmaSortedSet = new TreeSet<>();
+        SortedSet<Lemma> lemmaSet = new TreeSet<>();
         int countPages = (int) pageRepository.countBySite(site);
 
         for (String word : query.split("\\s+")) {
@@ -233,13 +246,14 @@ public class SearchService {
                 continue;
             }
 
-            boolean isFoundInLargeCountPages = (float) (lemma.getFrequency() / countPages) < 0.7;
+            float percentFoundInLargeCountPages = (float) lemma.getFrequency() / countPages;
+            boolean isFoundInLargeCountPages =  percentFoundInLargeCountPages < 0.7;
             if (isFoundInLargeCountPages) {
-                lemmaSortedSet.add(lemma);
+                lemmaSet.add(lemma);
             }
-        }
 
-        return lemmaSortedSet;
+        }
+        return lemmaSet;
     }
 
     private String clearText(String text) {

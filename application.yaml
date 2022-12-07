@@ -19,6 +19,7 @@ spring:
     user:
       name: admin
       password: admin
+      roles: ADMIN
   datasource:
     username: root
     password: 6Jgfj2NO
