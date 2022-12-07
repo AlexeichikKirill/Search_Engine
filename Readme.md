@@ -99,4 +99,12 @@ indexing-settings:
       name: <Name site>
  ``` 
 
+- Spring security is used here. Log in to continue.
+``` yaml
+spring:
+  security:
+    user:
+      name: admin
+      password: admin
+ ``` 
 ***
